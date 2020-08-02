@@ -1,0 +1,30 @@
+{
+	"folders": [
+		{
+			"path": "ESP32_Test_0"
+		},
+		{
+			"path": "C:\\Users\\Bico\\.platformio"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"array": "cpp",
+			"*.tcc": "cpp",
+			"memory": "cpp",
+			"future": "cpp",
+			"istream": "cpp",
+			"functional": "cpp",
+			"tuple": "cpp",
+			"utility": "cpp",
+			"deque": "cpp",
+			"list": "cpp",
+			"string": "cpp",
+			"unordered_map": "cpp",
+			"unordered_set": "cpp",
+			"vector": "cpp",
+			"string_view": "cpp",
+			"initializer_list": "cpp"
+		}
+	}
+}
