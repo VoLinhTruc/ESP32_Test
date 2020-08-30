@@ -1,24 +1,28 @@
 #include <Arduino.h>
+#include <WiFi.h>
 #include <FreeRTOS.h>
 #include <ArduinoJson.h>
-#include <WiFi.h>
 #include "miscellaneous.h"
+
+#include <iostream> 
+#include <unordered_map> 
+using namespace std;
 
 const char* ssid     = "BICO_2.4G";
 const char* password = "Bico0388";
 
+unordered_map<string, int> umap; 
+
 void defaultTask(void* parameters);
 void blinkTask(void* period);
-void analogReadTask(void* pin);
+void tcpServerManagerTask(void* q_handler);
+xQueueHandle to_tcpServerManagerTask_queue;
+
 void clientHandlerTask(void* client);
 void serverHandlerTask(void* server);
 
 void setup()
 {
-
-
-  //--------------------------------------------------------------------------
-
   xTaskCreate(
     defaultTask,
     "default_task", 
@@ -27,37 +31,6 @@ void setup()
     tskIDLE_PRIORITY, 
     NULL
   );
-
-  // TaskHandle_t analog_read_task_handle_1 = NULL;
-  // uint8_t analog_pin_1 = 35;
-  // xTaskCreate(
-  //   analogReadTask,
-  //   "analog_read_task_1", 
-  //   1024, 
-  //   &analog_pin_1, 
-  //   tskIDLE_PRIORITY, 
-  //   &analog_read_task_handle_1
-  // );
-
-  // #define NUM_OF_TCP_LISTENER 2
-  // for (size_t i = 0; i < NUM_OF_TCP_LISTENER; i++)
-  // {
-  //   TaskHandle_t tcp_listen_task = NULL;
-  //   uint16_t tcp_port = 100+i;
-  //   char task_name[50] = "tcp_listener_";
-  //   char task_index[2];
-  //   itoa(i, task_index, 10);
-  //   strcat(task_name, task_index);
-
-  //   // xTaskCreate(
-  //   //   analogReadTask,
-  //   //   "analog_read_task", 
-  //   //   1024, 
-  //   //   &analog_pin, 
-  //   //   tskIDLE_PRIORITY, 
-  //   //   &analog_read_task_handle
-  //   // );
-  // }
 }
 
 void loop()
@@ -75,6 +48,7 @@ void loop()
 
 void defaultTask(void* parameters)
 {
+
   (void) parameters;
 
   Serial.begin(9600);
@@ -90,6 +64,12 @@ void defaultTask(void* parameters)
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());  
 
+//-----------------------------------------------
+
+to_tcpServerManagerTask_queue = xQueueCreate(MAX_NUM_OF_MESSAGE_QUEUE_ELEMENT, sizeof(int));
+
+//-----------------------------------------------
+
   TaskHandle_t blink_task_handle = NULL;
   uint32_t task_blink_period = 1000;
   xTaskCreate(
@@ -100,22 +80,17 @@ void defaultTask(void* parameters)
     tskIDLE_PRIORITY, 
     &blink_task_handle
   );
-
-  TaskHandle_t analog_read_task_handle = NULL;
-  uint8_t analog_pin = 34;
+  
   xTaskCreate(
-    analogReadTask,
-    "analog_read_task", 
-    1024, 
-    &analog_pin, 
+    tcpServerManagerTask,
+    "tcp_server_manager_task", 
+    4096, 
+    NULL, 
     tskIDLE_PRIORITY, 
-    &analog_read_task_handle
+    NULL
   );
-
-  //--------------------------------------------------------------------------
-
-  WiFiServer* server;
-  TaskHandle_t server_task_handler = NULL;
+  
+//--------------------------------------------------------------------------
 
   while (1)
   {  
@@ -123,47 +98,50 @@ void defaultTask(void* parameters)
     {
       String cmd = Serial.readString();
 
-      StaticJsonDocument<200> doc;
+      DynamicJsonDocument doc(2048);
       DeserializationError error = deserializeJson(doc, cmd);
       if (error) 
       {
         Serial.print(F("deserializeJson() failed: "));
         Serial.println(error.c_str());
-        return;
       }
-
-      String cmd_name = doc["cmd_name"];
-      uint16_t server_port = doc["server_port"];
-      
-      Serial.println(cmd_name);
-      Serial.println(server_port);
-
-      if(cmd_name == String("new"))
+      else
       {
-        WiFiServer server_0(server_port);
-        server = new WiFiServer;
-        *server = server_0;
-        server->begin();
+        String cmd_name = doc["cmd_name"];
+        String server_alias = doc["server_alias"];
+        uint16_t server_port = doc["server_port"];
+        
+        Serial.println("-------------------------");
+        Serial.println(cmd_name);
+        Serial.println(server_alias);
+        Serial.println(server_port);
+        Serial.println("-------------------------");
 
-        Serial.println("Server Start.");
-        xTaskCreate
-        (
-          serverHandlerTask,
-          "server_handler_task",
-          4096,
-          (void*)server,
-          tskIDLE_PRIORITY,
-          &server_task_handler
-        );
-      }
-      else if (cmd_name == "delete")
-      {
-        if((server_task_handler != NULL) && (server != NULL))
+        // Preparing Message Queue here -------------------------------------------
+        Message_Queue* temp_mq_handle = creatMQ();
+
+        temp_mq_handle->message = createMQMessage(cmd_name.length());
+        memcpy(temp_mq_handle->message, cmd_name.c_str(), cmd_name.length());
+        temp_mq_handle->message[cmd_name.length()-1] = 0;
+
+        Server_Properties* sp_handle = createSerProp();
+
+        sp_handle->alias = createSerPropAlias(server_alias.length());
+        memcpy(sp_handle->alias, server_alias.c_str(), server_alias.length());
+        sp_handle->alias[server_alias.length()-1] = 0;
+        
+        sp_handle->port = server_port;
+
+        temp_mq_handle->data = sp_handle;
+        // Preparing Message Queue here -------------------------------------------
+
+        if(xQueueSend(to_tcpServerManagerTask_queue, &temp_mq_handle, 1000))
         {
-          vTaskDelete(server_task_handler);
-          server->end();
-          delete server;
-          Serial.println("Server End.");
+
+        }
+        else
+        {
+          Serial.println("Command is not executed !");
         }
       }
     }
@@ -181,6 +159,8 @@ void defaultTask(void* parameters)
   }
 }
 
+//-----------------------------------------------------------------------------------------------
+
 void blinkTask(void* period)
 {
   uint32_t _period = *((uint32_t*)period);
@@ -196,23 +176,32 @@ void blinkTask(void* period)
   }
 }
 
-void analogReadTask(void* pin)
+void tcpServerManagerTask(void* para)
 {
-  uint8_t _pin = *((uint8_t*)pin);
+  Message_Queue* _mq_handle;
 
-  for (;;)
+  while(1)
   {
-    uint16_t value = analogRead(_pin);
-    
-    StaticJsonDocument<200> doc;
-    doc["pin"] = _pin;
-    doc["analog_value"] = value;
-    serializeJson(doc, Serial);
-    Serial.println();
+    if (xQueueReceive(to_tcpServerManagerTask_queue, &_mq_handle, 1000))
+    {
+      String message = _mq_handle->message;
+      String server_alias = ((Server_Properties*)(_mq_handle->data))->alias;
+      String server_port = String(((Server_Properties*)(_mq_handle->data))->port);
 
-    vTaskDelay(2000);
+      deleteWholeSerProp(((Server_Properties*)(_mq_handle->data)));
+      deleteMQMessage(_mq_handle);
+      deleteMQ(_mq_handle);
+
+      Serial.println(message);
+      Serial.println(server_alias);
+      Serial.println(server_port);
+    }
+
+    vTaskDelay(1);
   }
 }
+
+
 
 void clientHandlerTask(void* client)
 {
