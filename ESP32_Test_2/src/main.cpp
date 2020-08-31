@@ -22,3 +22,12 @@ void loop() {
   // put your main code here, to run repeatedly:
 
 }
+
+  // WiFiClient tran;
+  // while(1)
+  // {
+  //   tran.connect("192.168.1.13", 6969, 100);
+  //   // tran.stop();
+  //   Serial.println(esp_get_free_heap_size());
+  //   vTaskDelay(100);
+  // }

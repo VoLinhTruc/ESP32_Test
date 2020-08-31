@@ -11,6 +11,7 @@
         "streambuf": "cpp",
         "functional": "cpp",
         "array": "cpp",
-        "string": "cpp"
+        "string": "cpp",
+        "istream": "cpp"
     }
 }
